@@ -2104,7 +2104,12 @@
     function highlight(text, kw) {
       const e = escHtml(text);
       if (!kw) return e;
-      return e.replace(new RegExp(escRegex(kw), 'gi'), m => `<mark>${m}</mark>`);
+      // キーワードをスペース分割し、各語のかなバリアントをすべてORで結合してハイライト
+      const patterns = kw.replace(/　/g, ' ').split(/\s+/).filter(k => k.length > 0)
+        .flatMap(k => expandKana(k))
+        .map(escRegex);
+      if (!patterns.length) return e;
+      return e.replace(new RegExp(patterns.join('|'), 'gi'), m => `<mark>${m}</mark>`);
     }
     function escHtml(s) {
       return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
