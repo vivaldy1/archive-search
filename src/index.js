@@ -65,9 +65,9 @@ async function handleAction(db, action, params) {
     // params: { keywords[], mode, dateFrom, dateTo, order, limit }
     // -----------------------------------------------------------------------
     case "search_subtitles": {
-      const { keywords = [], mode = "AND", dateFrom, dateTo, order = "DESC", limit = 200 } = params;
+      const { keywords = [], keywordGroups, mode = "AND", dateFrom, dateTo, order = "DESC", limit = 200 } = params;
       const { whereSQL, bindParams } = buildSearchWhere(
-        keywords, mode, "s.text", dateFrom, dateTo
+        keywords, mode, "s.text", dateFrom, dateTo, keywordGroups
       );
       const safeOrder = order === "ASC" ? "ASC" : "DESC";
       const safeLimit = Math.min(Number(limit) || 200, 1000);
@@ -90,9 +90,9 @@ async function handleAction(db, action, params) {
     // params: { keywords[], mode, dateFrom, dateTo, order, limit }
     // -----------------------------------------------------------------------
     case "search_comments": {
-      const { keywords = [], mode = "AND", dateFrom, dateTo, order = "DESC", limit = 200 } = params;
+      const { keywords = [], keywordGroups, mode = "AND", dateFrom, dateTo, order = "DESC", limit = 200 } = params;
       const { whereSQL, bindParams } = buildSearchWhere(
-        keywords, mode, "c.comment", dateFrom, dateTo
+        keywords, mode, "c.comment", dateFrom, dateTo, keywordGroups
       );
       const safeOrder = order === "ASC" ? "ASC" : "DESC";
       const safeLimit = Math.min(Number(limit) || 200, 1000);
@@ -115,9 +115,9 @@ async function handleAction(db, action, params) {
     // params: { keywords[], mode, dateFrom, dateTo, order, limit, userId? }
     // -----------------------------------------------------------------------
     case "search_live_chats": {
-      const { keywords = [], mode = "AND", dateFrom, dateTo, order = "DESC", limit = 200, userId } = params;
+      const { keywords = [], keywordGroups, mode = "AND", dateFrom, dateTo, order = "DESC", limit = 200, userId } = params;
       const { whereSQL, bindParams } = buildSearchWhere(
-        keywords, mode, "lc.message", dateFrom, dateTo
+        keywords, mode, "lc.message", dateFrom, dateTo, keywordGroups
       );
 
       // userId 絞り込みを WHERE 句の末尾に追加
@@ -229,8 +229,10 @@ async function handleAction(db, action, params) {
 
 // ---------------------------------------------------------------------------
 // ヘルパー: 検索用 WHERE 句を組み立てる
+// keywordGroups: string[][] — 各グループは同一キーワードのかな表記バリアント（内部OR）
+//                            グループ同士はmode(AND/OR)で結合
 // ---------------------------------------------------------------------------
-function buildSearchWhere(keywords, mode, column, dateFrom, dateTo) {
+function buildSearchWhere(keywords, mode, column, dateFrom, dateTo, keywordGroups) {
   const conditions = ["v.title != '[unavailable]'"];
   const bindParams = [];
 
@@ -242,11 +244,19 @@ function buildSearchWhere(keywords, mode, column, dateFrom, dateTo) {
     conditions.push("v.published_at <= ?");
     bindParams.push(dateTo + " 23:59:59");
   }
-  if (keywords.length > 0) {
-    const op = mode === "OR" ? " OR " : " AND ";
-    const kwClauses = keywords.map(() => `${column} LIKE ?`);
-    conditions.push(`(${kwClauses.join(op)})`);
-    keywords.forEach(k => bindParams.push(`%${k}%`));
+
+  const groups = keywordGroups && keywordGroups.length > 0
+    ? keywordGroups
+    : keywords.length > 0 ? keywords.map(k => [k]) : [];
+
+  if (groups.length > 0) {
+    const outerOp = mode === "OR" ? " OR " : " AND ";
+    const groupClauses = groups.map(variants => {
+      const varClauses = variants.map(() => `${column} LIKE ?`);
+      variants.forEach(v => bindParams.push(`%${v}%`));
+      return variants.length === 1 ? varClauses[0] : `(${varClauses.join(" OR ")})`;
+    });
+    conditions.push(`(${groupClauses.join(outerOp)})`);
   }
 
   const whereSQL = `WHERE ${conditions.join(" AND ")}`;
